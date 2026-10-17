@@ -74,6 +74,10 @@ func (c *FakeUDPConn) putPacket(content []byte) {
 	select {
 	case c.packets <- content:
 	default:
+		// The channel is full and the packet is dropped, so return its
+		// buffer to the pool. The channel guarantees a buffer is either
+		// consumed by Read (which returns it) or dropped here, never both.
+		pool.PutBuf(content)
 	}
 }
 
@@ -82,6 +86,7 @@ func (c *FakeUDPConn) Read(b []byte) (n int, err error) {
 	if !ok {
 		return 0, io.EOF
 	}
+	defer pool.PutBuf(content)
 	c.mu.Lock()
 	c.lastActive = time.Now()
 	c.mu.Unlock()
@@ -182,6 +187,7 @@ func ListenUDP(bindAddr string, bindPort int) (l *UDPListener, err error) {
 			buf := pool.GetBuf(1450)
 			n, remoteAddr, err := readConn.ReadFromUDP(buf)
 			if err != nil {
+				pool.PutBuf(buf)
 				close(l.acceptCh)
 				close(l.writeCh)
 				return
